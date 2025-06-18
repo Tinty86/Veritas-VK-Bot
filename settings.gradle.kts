@@ -1,0 +1,1 @@
+rootProject.name = "Veritas-VK-Bot"
