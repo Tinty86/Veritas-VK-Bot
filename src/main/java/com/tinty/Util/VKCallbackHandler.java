@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class VKCallbackHandler {
     private final VKBotConfig config;
     Set<Long> allowedToWriteUsers = ConcurrentHashMap.newKeySet();
+    private boolean isJoining = false;
 
     public VKCallbackHandler(VKBotConfig config) {
         this.config = config;
@@ -39,17 +40,16 @@ public class VKCallbackHandler {
         long peerId = msg.get("peer_id").getAsLong();
         String text = msg.get("text").getAsString();
 
-        Keyboard kb = buildInlineKeyboard();
-
         if (allowedToWriteUsers.contains(peerId)) {
             // Обрабатываем и удаляем разрешение
             allowedToWriteUsers.remove(peerId);
+            Keyboard kb = buildLobbyInlineKeyboard();
 
             try {
                 config.vk.messages()
                         .sendDeprecated(config.actor)
                         .peerId(peerId)
-                        .message("Комментарий получен: " + text)
+                        .message("Комментарий сохранен.")
                         .keyboard(kb)
                         .randomId((int) (Math.random() * Integer.MAX_VALUE))
                         .execute();
@@ -58,11 +58,12 @@ public class VKCallbackHandler {
             }
         } else {
             if (text.equals("Начать")) {
+                Keyboard kb = buildStartInlineKeyboard();
                 try {
                     config.vk.messages()
                             .sendDeprecated(config.actor)
                             .peerId(peerId)
-                            .message("a")
+                            .message("Здравствуйте, это Veritas бот!\nЕсли вы хотите присоединиться к лобби игры Veritas, то нажмите на кнопку 'Присоединиться' и введите код лобби.")
                             .keyboard(kb)
                             .randomId((int) (Math.random() * Integer.MAX_VALUE))
                             .execute();
@@ -70,17 +71,22 @@ public class VKCallbackHandler {
                     throw new RuntimeException(e);
                 }
             } else {
-                // Игнор или предупреждение
-                try {
-                    config.vk.messages()
-                            .sendDeprecated(config.actor)
-                            .peerId(peerId)
-                            .message("Пожалуйста, сначала нажмите кнопку 'Прокомментировать'")
-                            .keyboard(kb)
-                            .randomId((int) (Math.random() * Integer.MAX_VALUE))
-                            .execute();
-                } catch (ApiException | ClientException e) {
-                    throw new RuntimeException(e);
+                if (isJoining) {
+                    System.out.println(text);
+                } else {
+                    // Игнор или предупреждение
+                    Keyboard kb = buildLobbyInlineKeyboard();
+                    try {
+                        config.vk.messages()
+                                .sendDeprecated(config.actor)
+                                .peerId(peerId)
+                                .message("Пожалуйста, сначала выберите действие.")
+                                .keyboard(kb)
+                                .randomId((int) (Math.random() * Integer.MAX_VALUE))
+                                .execute();
+                    } catch (ApiException | ClientException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
             }
         }
@@ -91,76 +97,79 @@ public class VKCallbackHandler {
         long peerId = event.get("peer_id").getAsLong();
         String payload = event.get("payload").getAsJsonObject().get("action").getAsString();
 
-        if ("allow_comment".equals(payload)) {
+        if (payload.equals("allow_comment")) {
             allowedToWriteUsers.add(peerId); // разрешаем писать
 
             // Обязательно подтвердить callback (иначе кнопка не "моргнёт")
             try {
                 config.vk.messages()
+                        .sendDeprecated(config.actor)
+                        .peerId(peerId)
+                        .message("Теперь вы можете оставить комментарий.")
+                        .randomId((int) (Math.random() * Integer.MAX_VALUE))
+                        .execute();
+
+                config.vk.messages()
                         .sendMessageEventAnswer(config.actor)
                         .eventId(event.get("event_id").getAsString())
                         .userId((long) event.get("user_id").getAsInt())
                         .peerId(peerId)
-                        .eventData("{\"type\": \"show_snackbar\", \"text\": \"Теперь вы можете оставить комментарий\"}")
+                        .eventData("{\"type\": \"show_snackbar\", \"text\": \"Теперь вы можете оставить комментарий.\"}")
                         .execute();
             } catch (ApiException | ClientException e) {
                 throw new RuntimeException(e);
             }
+        } else if (payload.equals("join_lobby")) {
+            try {
+                config.vk.messages()
+                        .sendDeprecated(config.actor)
+                        .peerId(peerId)
+                        .message("Введите код лобби:")
+                        .randomId((int) (Math.random() * Integer.MAX_VALUE))
+                        .execute();
 
-//            // Уведомление
-//            try {
-//                config.vk.messages()
-//                        .sendDeprecated(config.actor)
-//                        .peerId(peerId)
-//                        .message("Теперь вы можете оставить комментарий")
-//                        .randomId((int) (Math.random() * Integer.MAX_VALUE))
-//                        .execute();
-//            } catch (ApiException | ClientException e) {
-//                throw new RuntimeException(e);
-//            }
+                isJoining = true;
+            } catch (ApiException | ClientException e) {
+                throw new RuntimeException(e);
+            }
         }
-
-//        System.out.println("Received: " + text + " from: " + peerId);
-//
-//        Keyboard kb = buildInlineKeyboard();
-//
-//        try {
-//            config.vk.messages()
-//                    .sendDeprecated(config.actor)
-//                    .peerId(peerId)
-//                    .message("Echo: " + text)
-//                    .keyboard(kb)
-//                    .randomId((int) (Math.random() * Integer.MAX_VALUE))
-//                    .execute();
-//        } catch (ApiException | ClientException e) {
-//            e.printStackTrace();
-//        }
 
         return "ok";
     }
 
-    private Keyboard buildInlineKeyboard() {
+    private Keyboard buildStartInlineKeyboard() {
+        KeyboardButtonActionCallback joinAction = new KeyboardButtonActionCallback()
+                .setType(KeyboardButtonActionCallbackType.CALLBACK)
+                .setPayload("{\"action\":\"join_lobby\"}")
+                .setLabel("Присоедениться");
 
-        // Действие кнопки
+        KeyboardButton joinButton = new KeyboardButton()
+                .setAction(joinAction)
+                .setColor(KeyboardButtonColor.PRIMARY);
+
+        List<KeyboardButton> row1 = List.of(joinButton);
+        List<List<KeyboardButton>> buttons = List.of(row1);
+
+        return new Keyboard()
+                .setInline(true) // именно inline‑клавиатура
+                .setButtons(buttons);
+    }
+
+    private Keyboard buildLobbyInlineKeyboard() {
         KeyboardButtonActionCallback commentAction = new KeyboardButtonActionCallback()
                 .setType(KeyboardButtonActionCallbackType.CALLBACK)
                 .setPayload("{\"action\":\"allow_comment\"}") // что придёт в message.text
-                .setLabel("Прокомментировать"); // текст на кнопке
+                .setLabel("Прокомментировать");
 
-        // Сама кнопка
         KeyboardButton commentButton = new KeyboardButton()
                 .setAction(commentAction)
                 .setColor(KeyboardButtonColor.PRIMARY); // синий
 
         List<KeyboardButton> row1 = List.of(commentButton);
-        // Можно добавить ещё строки:
-        // List<KeyboardButton> row2 = List.of(settingsButton, aboutButton);
-        List<List<KeyboardButton>> buttons = List.of(row1 /*, row2, … */);
-
-        // именно inline‑клавиатура
+        List<List<KeyboardButton>> buttons = List.of(row1);
 
         return new Keyboard()
-                .setInline(true) // именно inline‑клавиатура
+                .setInline(true)
                 .setButtons(buttons);
     }
 }
