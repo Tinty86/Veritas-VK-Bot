@@ -1,4 +1,4 @@
-package com.tinty.Util;
+package com.tinty.Bot;
 
 import com.vk.api.sdk.client.VkApiClient;
 import com.vk.api.sdk.client.actors.GroupActor;
@@ -12,7 +12,10 @@ public class VKBotConfig {
     public final String secret;
 
     public VKBotConfig(Long groupId) {
-        Dotenv dotenv = Dotenv.load();
+        // Пытаемся загрузить из директории "Private", относительно текущей рабочей директории
+        Dotenv dotenv = Dotenv.configure()
+                .directory("./Private")
+                .load();
         String token = dotenv.get("VK_TOKEN");
         this.confirmation = dotenv.get("VK_CONFIRMATION");
         this.secret = dotenv.get("SECRET");

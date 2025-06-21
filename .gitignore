@@ -21,4 +21,4 @@ gradle-app.setting
 .classpath
 
 .idea/
-.env
+Private/
