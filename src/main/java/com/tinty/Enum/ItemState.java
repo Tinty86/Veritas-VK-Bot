@@ -1,6 +1,6 @@
 package com.tinty.Enum;
 
-public enum QuestionState {
+public enum ItemState {
     NONE,
     FIRST,
     LAST

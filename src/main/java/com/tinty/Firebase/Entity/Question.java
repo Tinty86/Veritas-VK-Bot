@@ -32,7 +32,9 @@ public class Question {
             this.content = content;
             this.type = type;
             timeStamp = getCurrentTimeStamp();
-            this.answers = answers;
+
+            if (answers == null) this.answers = new ArrayList<>();
+            else this.answers = answers;
         } else {
             System.err.println("question class got inappropriate question type.\nReceived question type: " + type);
         }

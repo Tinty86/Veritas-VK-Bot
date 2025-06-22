@@ -2,7 +2,7 @@ package com.tinty.Bot;
 
 import com.google.gson.JsonObject;
 import com.tinty.Bot.Entity.QuestionMessage;
-import com.tinty.Enum.QuestionState;
+import com.tinty.Enum.ItemState;
 import com.tinty.Enum.UserState;
 import com.tinty.Firebase.Entity.Answer;
 import com.tinty.Firebase.Entity.Question;
@@ -133,14 +133,14 @@ public class VKCallbackHandler {
                         getGroupQuestions(groupId, new OnQuestionsRetrievedListener() {
                             @Override
                             public void onSuccess(List<Question> questions) {
-                                Keyboard kb = buildLobbyInlineKeyboard(QuestionState.FIRST);
+                                Keyboard kb = buildLobbyInlineKeyboard(ItemState.FIRST);
                                 Question firstQuestion = questions.getFirst();
                                 QuestionMessage questionMessage = new QuestionMessage(
                                         firstQuestion.getContent(),
                                         firstQuestion.getType(),
                                         firstQuestion.getAnswers(),
                                         (ArrayList<Question>) questions,
-                                        QuestionState.FIRST
+                                        ItemState.FIRST
                                 );
                                 userMessages.put(peerId, questionMessage);
                                 sendMessage(peerId, questionMessage.getContent(), kb);
@@ -167,7 +167,8 @@ public class VKCallbackHandler {
 
     private String handleMessageEvent(JsonObject event) {
         long peerId = event.get("peer_id").getAsLong();
-        String action = event.get("payload").getAsJsonObject().get("action").getAsString();
+        JsonObject payload = event.get("payload").getAsJsonObject();
+        String action = payload.get("action").getAsString();
 
         switch (action) {
             case "join_lobby" -> {
@@ -191,10 +192,10 @@ public class VKCallbackHandler {
                             prevQuestion.getType(),
                             prevQuestion.getAnswers(),
                             questions,
-                            QuestionState.NONE
+                            ItemState.NONE
                     ));
                 } else {
-                    kb = buildLobbyInlineKeyboard(QuestionState.FIRST);
+                    kb = buildLobbyInlineKeyboard(ItemState.FIRST);
                     sendMessage(peerId, "Более ранних вопросов нет.", kb); // Не достижимо, но пусть будет
 
                     userMessages.replace(peerId, new QuestionMessage(
@@ -202,7 +203,7 @@ public class VKCallbackHandler {
                             questionMessage.getType(),
                             questionMessage.getAnswers(),
                             questions,
-                            QuestionState.FIRST
+                            ItemState.FIRST
                     ));
                 }
             }
@@ -212,7 +213,48 @@ public class VKCallbackHandler {
                 sendMessage(peerId, "Теперь вы можете оставить комментарий:");
             }
             case "read_action" -> {
+                ArrayList<Answer> answers;
+                if (!(answers = userMessages.get(peerId).getAnswers()).isEmpty()) {
+                    Keyboard kb = buildReadInlineKeyboard(ItemState.FIRST, 0);
 
+                    Answer answer = answers.getFirst();
+                    String message = String.format("%s %s\n\n%s",
+                            answer.getAuthor(), answer.getTimeStamp(), answer.getText());
+                    sendMessage(peerId, message, kb);
+                } else {
+                    sendMessage(peerId, "К этому вопросу пока нет комментариев.");
+                }
+
+            }
+            case "move_back_read" -> {
+                int answerIndex = payload.get("answer_index").getAsInt() - 1; // answer_index stores index of the next question
+                ArrayList<Answer> answers = userMessages.get(peerId).getAnswers();
+
+                Keyboard kb;
+                if (answerIndex == 0) kb = buildReadInlineKeyboard(ItemState.FIRST, answerIndex);
+                else kb = buildReadInlineKeyboard(ItemState.NONE, answerIndex);
+
+                Answer answer = answers.get(answerIndex);
+
+                String message = String.format("%s %s\n\n%s",
+                        answer.getAuthor(), answer.getTimeStamp(), answer.getText());
+
+                sendMessage(peerId, message, kb);
+            }
+            case "move_forward_read" -> {
+                int answerIndex = payload.get("answer_index").getAsInt() + 1; // answer_index stores index of the prev question
+                ArrayList<Answer> answers = userMessages.get(peerId).getAnswers();
+
+                Keyboard kb;
+                if (answerIndex == answers.size() - 1) kb = buildReadInlineKeyboard(ItemState.LAST, answerIndex);
+                else kb = buildReadInlineKeyboard(ItemState.NONE, answerIndex);
+
+                Answer answer = answers.get(answerIndex);
+
+                String message = String.format("%s %s\n\n%s",
+                        answer.getAuthor(), answer.getTimeStamp(), answer.getText());
+
+                sendMessage(peerId, message, kb);
             }
             case "move_forward" -> {
                 QuestionMessage questionMessage = userMessages.get(peerId);
@@ -230,23 +272,22 @@ public class VKCallbackHandler {
                     userMessages.replace(peerId, new QuestionMessage(
                             nextQuestion.getContent(),
                             nextQuestion.getType(),
-                            questionMessage.getAnswers(),
+                            nextQuestion.getAnswers(),
                             questions,
-                            QuestionState.NONE
+                            ItemState.NONE
                     ));
                 } else {
-                    kb = buildLobbyInlineKeyboard(QuestionState.LAST);
+                    kb = buildLobbyInlineKeyboard(ItemState.LAST);
                     sendMessage(peerId, "Более поздних вопросов нет.\n\nТекущий вопрос:\n" + questions.get(questionIndex).getContent(), kb);
                     userMessages.replace(peerId, new QuestionMessage(
                             questionMessage.getContent(),
                             questionMessage.getType(),
                             questionMessage.getAnswers(),
                             questions,
-                            QuestionState.LAST
+                            ItemState.LAST
                     ));
                 }
             }
-
         }
 
         return "ok";
@@ -277,6 +318,21 @@ public class VKCallbackHandler {
         } catch (ApiException | ClientException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private String getName(long peerId) {
+        List<GetResponse> users;
+        try {
+            users = config.vk.users()
+                    .get(config.actor)
+                    .userIds(String.valueOf(peerId))
+                    .execute();
+        } catch (ApiException | ClientException e) {
+            throw new RuntimeException(e);
+        }
+
+        GetResponse u = users.getFirst();
+        return u.getFirstName() + " " + u.getLastName();
     }
 
     private Keyboard buildStartInlineKeyboard() {
@@ -348,12 +404,12 @@ public class VKCallbackHandler {
                 .setButtons(buttons);
     }
 
-    private Keyboard buildLobbyInlineKeyboard(QuestionState state) {
-        if (state == QuestionState.NONE) return buildLobbyInlineKeyboard();
+    private Keyboard buildLobbyInlineKeyboard(ItemState state) {
+        if (state == ItemState.NONE) return buildLobbyInlineKeyboard();
 
         KeyboardButton[] buttonRow = new KeyboardButton[3];
 
-        if (state != QuestionState.FIRST) {
+        if (state != ItemState.FIRST) {
             KeyboardButtonActionCallback backAction = new KeyboardButtonActionCallback()
                     .setType(KeyboardButtonActionCallbackType.CALLBACK)
                     .setPayload("{\"action\":\"move_back\"}")
@@ -376,7 +432,7 @@ public class VKCallbackHandler {
                 .setPayload("{\"action\":\"read_action\"}")
                 .setLabel("\uD83D\uDCD6");
 
-        if (state != QuestionState.LAST) {
+        if (state != ItemState.LAST) {
             KeyboardButtonActionCallback forwardAction = new KeyboardButtonActionCallback()
                     .setType(KeyboardButtonActionCallbackType.CALLBACK)
                     .setPayload("{\"action\":\"move_forward\"}")
@@ -397,7 +453,7 @@ public class VKCallbackHandler {
                 .setAction(readAction)
                 .setColor(KeyboardButtonColor.DEFAULT);
 
-        if (state == QuestionState.FIRST) {
+        if (state == ItemState.FIRST) {
             buttonRow[0] = commentButton;
             buttonRow[1] = readButton;
         } else {
@@ -412,18 +468,86 @@ public class VKCallbackHandler {
                 .setButtons(buttons);
     }
 
-    private String getName(long peerId) {
-        List<GetResponse> users;
-        try {
-            users = config.vk.users()
-                    .get(config.actor)
-                    .userIds(String.valueOf(peerId))
-                    .execute();
-        } catch (ApiException | ClientException e) {
-            throw new RuntimeException(e);
-        }
+    public Keyboard buildReadInlineKeyboard(ItemState state, int answerIndex) {
+        KeyboardButton[] buttonRow;
+        switch (state) {
+            case FIRST -> {
+                buttonRow = new KeyboardButton[1];
 
-        GetResponse u = users.getFirst();
-        return u.getFirstName() + " " + u.getLastName();
+                KeyboardButtonActionCallback forwardAction = new KeyboardButtonActionCallback()
+                        .setType(KeyboardButtonActionCallbackType.CALLBACK)
+                        .setPayload(String.format("{" +
+                                "\"action\":\"move_forward_read\"," +
+                                "\"answer_index\":%d" +
+                                "}",
+                                answerIndex))
+                        .setLabel("➡️");
+
+                KeyboardButton forwardButton = new KeyboardButton()
+                        .setAction(forwardAction)
+                        .setColor(KeyboardButtonColor.DEFAULT);
+
+                buttonRow[0] = forwardButton;
+            }
+            case NONE -> {
+                buttonRow = new KeyboardButton[2];
+
+                KeyboardButtonActionCallback backAction = new KeyboardButtonActionCallback()
+                        .setType(KeyboardButtonActionCallbackType.CALLBACK)
+                        .setPayload(String.format("{" +
+                                        "\"action\":\"move_back_read\"," +
+                                        "\"answer_index\":%d" +
+                                        "}",
+                                answerIndex))
+                        .setLabel("⬅️");
+
+                KeyboardButton backButton = new KeyboardButton()
+                        .setAction(backAction)
+                        .setColor(KeyboardButtonColor.DEFAULT);
+
+                KeyboardButtonActionCallback forwardAction = new KeyboardButtonActionCallback()
+                        .setType(KeyboardButtonActionCallbackType.CALLBACK)
+                        .setPayload(String.format("{" +
+                                        "\"action\":\"move_forward_read\"," +
+                                        "\"answer_index\":%d" +
+                                        "}",
+                                answerIndex))
+                        .setLabel("➡️");
+
+                KeyboardButton forwardButton = new KeyboardButton()
+                        .setAction(forwardAction)
+                        .setColor(KeyboardButtonColor.DEFAULT);
+
+                buttonRow[0] = backButton;
+                buttonRow[1] = forwardButton;
+            }
+            case LAST -> {
+                buttonRow = new KeyboardButton[1];
+
+                KeyboardButtonActionCallback backAction = new KeyboardButtonActionCallback()
+                        .setType(KeyboardButtonActionCallbackType.CALLBACK)
+                        .setPayload(String.format("{" +
+                                        "\"action\":\"move_back_read\"," +
+                                        "\"answer_index\":%d" +
+                                        "}",
+                                answerIndex))
+                        .setLabel("⬅️");
+
+                KeyboardButton backButton = new KeyboardButton()
+                        .setAction(backAction)
+                        .setColor(KeyboardButtonColor.DEFAULT);
+
+                buttonRow[0] = backButton;
+            }
+            case null, default -> {
+                System.err.println("buildReadInlineKeyboard: Некорректный ItemState ");
+                return null;
+            }
+        }
+        List<List<KeyboardButton>> buttons = List.of(List.of(buttonRow));
+
+        return new Keyboard()
+                .setInline(true)
+                .setButtons(buttons);
     }
 }

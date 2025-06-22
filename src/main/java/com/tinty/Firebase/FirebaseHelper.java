@@ -7,6 +7,7 @@ import com.google.firebase.database.*;
 import com.google.firebase.database.core.SyncTree;
 import com.google.firebase.database.core.view.Event;
 import com.google.firebase.internal.NonNull;
+import com.tinty.Firebase.Entity.Answer;
 import com.tinty.Firebase.Entity.GroupParticipant;
 import com.tinty.Firebase.Entity.Question;
 import io.github.cdimascio.dotenv.Dotenv;
@@ -100,7 +101,6 @@ public class FirebaseHelper {
      * @param groupId The id of the group which user joins
      */
 
-    // TODO: ПОДКЛЮЧИТЬ ФУНКЦИЮ
     public static void addParticipant(String groupId, long userId) {
         GroupParticipant newParticipant = new GroupParticipant(userId);
         DatabaseReference groupRef = FirebaseDatabase.getInstance().getReference(GROUPS_KEY)
@@ -182,6 +182,35 @@ public class FirebaseHelper {
                     }
                 });
     }
+
+//    public interface OnQuestionRetrievedListener {
+//        void onSuccess(Question question);
+//        void onFailure(String error);
+//    }
+//
+//    public static void getQuestionByIndex(String groupId, int questionIndex, OnQuestionRetrievedListener listener) {
+//        getGroupQuestions(groupId, new OnQuestionsRetrievedListener() {
+//            @Override
+//            public void onSuccess(List<Question> questions) {
+//                if (questionIndex >= questions.size() || questionIndex < 0) listener.onFailure("Некорректный индекс");
+//                else listener.onSuccess(questions.get(questionIndex));
+//            }
+//
+//            @Override
+//            public void onFailure(String error) {
+//                listener.onFailure(error);
+//            }
+//        });
+//    }
+//
+//    public interface OnAnswerRetrievedListener {
+//        void onSuccess(List<Answer> answers);
+//        void onFailure(String error);
+//    }
+//
+//    public static void getQuestionAnswers(String groupId, int questionIndex, OnAnswerRetrievedListener listener) {
+//
+//    }
 
     /**
      * Интерфейс для callback'ов при обновлении вопросов

@@ -1,6 +1,6 @@
 package com.tinty.Bot.Entity;
 
-import com.tinty.Enum.QuestionState;
+import com.tinty.Enum.ItemState;
 import com.tinty.Firebase.Entity.Answer;
 import com.tinty.Firebase.Entity.Question;
 
@@ -8,10 +8,10 @@ import java.util.ArrayList;
 
 public class QuestionMessage extends Question{
     private final ArrayList<Question> questions;
-    private QuestionState state;
+    private ItemState state;
 
     public QuestionMessage(String content, String type, ArrayList<Answer> answers,
-                           ArrayList<Question> questions, QuestionState state) {
+                           ArrayList<Question> questions, ItemState state) {
         super(content, type, answers);
         this.questions = questions;
         this.state = state;
@@ -21,11 +21,11 @@ public class QuestionMessage extends Question{
         return questions;
     }
 
-    public QuestionState getState() {
+    public ItemState getState() {
         return state;
     }
 
-    public void setState(QuestionState state) {
+    public void setState(ItemState state) {
         this.state = state;
     }
 }
