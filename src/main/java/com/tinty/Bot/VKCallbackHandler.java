@@ -9,6 +9,18 @@ import com.tinty.Firebase.Entity.Question;
 import com.vk.api.sdk.exceptions.ApiException;
 import com.vk.api.sdk.exceptions.ClientException;
 import com.vk.api.sdk.objects.messages.*;
+import com.vk.api.sdk.objects.users.responses.GetResponse;
+
+/*
+    // TODO: DEBUG
+    List<GetResponse> users = config.vk.users()
+            .get(config.actor)
+            .userIds(String.valueOf(peerId))
+            .execute();
+
+    GetResponse u = users.getFirst();
+    System.out.println(u.getFirstName() + " " + u.getLastName());
+*/
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -70,7 +82,8 @@ public class VKCallbackHandler {
             QuestionMessage currentQuestionMessage = userMessages.get(peerId);
 
             ArrayList<Answer> answers = currentQuestionMessage.getAnswers();
-            Answer answer = new Answer(peerId, text);
+
+            Answer answer = new Answer(peerId, text, getName(peerId));
             answers.add(answer);
 
             Question newQuestion = new Question(currentQuestionMessage.getContent(), currentQuestionMessage.getType(),
@@ -157,23 +170,6 @@ public class VKCallbackHandler {
         String action = event.get("payload").getAsJsonObject().get("action").getAsString();
 
         switch (action) {
-            case "allow_comment" -> {
-                allowedToWriteUsers.add(peerId);
-
-                // Обязательно подтвердить callback (иначе кнопка не "моргнёт")
-                sendMessage(peerId, "Теперь вы можете оставить комментарий:");
-//                try {
-//                    config.vk.messages()
-//                            .sendMessageEventAnswer(config.actor)
-//                            .eventId(event.get("event_id").getAsString())
-//                            .userId((long) event.get("user_id").getAsInt())
-//                            .peerId(peerId)
-//                            .eventData("{\"type\": \"show_snackbar\", \"text\": \"Теперь вы можете оставить комментарий.\"}")
-//                            .execute();
-//                } catch (ApiException | ClientException e) {
-//                    throw new RuntimeException(e);
-//                }
-            }
             case "join_lobby" -> {
                 sendMessage(peerId, "Введите код лобби:");
 
@@ -209,6 +205,14 @@ public class VKCallbackHandler {
                             QuestionState.FIRST
                     ));
                 }
+            }
+            case "allow_comment" -> {
+                allowedToWriteUsers.add(peerId);
+
+                sendMessage(peerId, "Теперь вы можете оставить комментарий:");
+            }
+            case "read_action" -> {
+
             }
             case "move_forward" -> {
                 QuestionMessage questionMessage = userMessages.get(peerId);
@@ -408,4 +412,18 @@ public class VKCallbackHandler {
                 .setButtons(buttons);
     }
 
+    private String getName(long peerId) {
+        List<GetResponse> users;
+        try {
+            users = config.vk.users()
+                    .get(config.actor)
+                    .userIds(String.valueOf(peerId))
+                    .execute();
+        } catch (ApiException | ClientException e) {
+            throw new RuntimeException(e);
+        }
+
+        GetResponse u = users.getFirst();
+        return u.getFirstName() + " " + u.getLastName();
+    }
 }
