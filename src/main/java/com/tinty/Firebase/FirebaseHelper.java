@@ -1,9 +1,11 @@
-package com.tinty.Firebase; // Предполагается, что это часть вашего существующего пакета
+package com.tinty.Firebase;
 
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
 import com.google.firebase.database.*;
+import com.google.firebase.database.core.SyncTree;
+import com.google.firebase.database.core.view.Event;
 import com.google.firebase.internal.NonNull;
 import com.tinty.Firebase.Entity.GroupParticipant;
 import com.tinty.Firebase.Entity.Question;
@@ -17,14 +19,10 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import static com.tinty.Main.getUserId;
-
 public class FirebaseHelper {
     public static final String GROUPS_KEY = "groups";
     public static final String PARTICIPANTS_KEY = "participants";
 
-    // Пример инициализации Firebase (если она еще не сделана)
-    // Обычно это делается один раз при запуске приложения
     public static void initializeFirebase() throws IOException {
         Dotenv dotenv = Dotenv.configure()
                 .directory("./Private")
@@ -39,7 +37,7 @@ public class FirebaseHelper {
                 .setDatabaseUrl(databaseUrl)
                 .build();
 
-        if (FirebaseApp.getApps().isEmpty()) { // Проверяем, чтобы избежать повторной инициализации
+        if (FirebaseApp.getApps().isEmpty()) {
             FirebaseApp.initializeApp(options);
             System.out.println("Firebase initialized successfully.");
         }
@@ -53,20 +51,17 @@ public class FirebaseHelper {
      * @return Map<String, Object>, содержащая данные из узла, или null, если данных нет или произошла ошибка.
      */
     public static Map<String, Object> getMapFromNode(String nodePath) {
-        // Получаем ссылку на базу данных
         FirebaseDatabase database = FirebaseDatabase.getInstance();
-        // Получаем ссылку на нужный узел
         DatabaseReference ref = database.getReference(nodePath);
 
         // Используем CountDownLatch для ожидания асинхронного ответа от Firebase
         CountDownLatch latch = new CountDownLatch(1);
         final Map<String, Object>[] resultHolder = new Map[1];
-        final Exception[] errorHolder = new Exception[1]; // Для хранения ошибок
+        final Exception[] errorHolder = new Exception[1];
 
         ref.addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot dataSnapshot) {
-                // GenericTypeIndicator используется для правильной десериализации в Map<String, Object>
                 GenericTypeIndicator<Map<String, Object>> genericTypeIndicator = new GenericTypeIndicator<>() {};
                 Map<String, Object> map = dataSnapshot.getValue(genericTypeIndicator);
                 resultHolder[0] = map;
@@ -82,13 +77,11 @@ public class FirebaseHelper {
         });
 
         try {
-            // Ожидаем завершения операции (с таймаутом, чтобы избежать бесконечного ожидания)
             if (!latch.await(10, TimeUnit.SECONDS)) { // Максимум 10 секунд ожидания
                 System.err.println("Firebase read timed out.");
                 return null;
             }
             if (errorHolder[0] != null) {
-                // Если произошла ошибка при чтении из Firebase, выбрасываем ее
                 throw new RuntimeException("Error reading from Firebase: " + errorHolder[0].getMessage(), errorHolder[0]);
             }
         } catch (InterruptedException e) {
@@ -107,8 +100,9 @@ public class FirebaseHelper {
      * @param groupId The id of the group which user joins
      */
 
-    public static void addParticipant(String groupId) {
-        GroupParticipant newParticipant = new GroupParticipant(getUserId());
+    // TODO: ПОДКЛЮЧИТЬ ФУНКЦИЮ
+    public static void addParticipant(String groupId, long userId) {
+        GroupParticipant newParticipant = new GroupParticipant(userId);
         DatabaseReference groupRef = FirebaseDatabase.getInstance().getReference(GROUPS_KEY)
                 .child(groupId);
 
@@ -187,5 +181,60 @@ public class FirebaseHelper {
                         listener.onFailure("Ошибка базы данных: " + error.getMessage());
                     }
                 });
+    }
+
+    /**
+     * Интерфейс для callback'ов при обновлении вопросов
+     */
+    public interface OnQuestionsUpdatedListener {
+        void onSuccess();
+        void onFailure(String error);
+    }
+
+    /**
+     * Обновить ArrayList<Question> для конкретной группы
+     * @param questions Обновленный список вопросов
+     * @param listener Callback для обработки результата
+     */
+    public static void updateGroupQuestions(String groupId, ArrayList<Question> questions,
+                                     OnQuestionsUpdatedListener listener) {
+        DatabaseReference groupRef = FirebaseDatabase.getInstance().getReference(GROUPS_KEY)
+                .child(groupId);
+        groupRef.child("questions")
+                .setValue(questions, (error, ref) -> {
+                    if (error == null) {
+//                        System.out.println("Successfully updated questions for group " + groupId);
+                        listener.onSuccess();
+                    } else {
+                        System.out.println("Failed to update questions for group " + groupId);
+                        listener.onFailure("Ошибка при обновлении: " + error.getMessage());
+                    }
+                });
+    }
+
+    /**
+     * Обновить конкретный вопрос по индексу
+     * @param questionIndex Индекс вопроса для обновления
+     * @param updatedQuestion Обновленный вопрос
+     * @param listener Callback для обработки результата
+     */
+    public static void updateQuestionByIndex(String groupId, int questionIndex, Question updatedQuestion,
+                                      OnQuestionsUpdatedListener listener) {
+        getGroupQuestions(groupId, new OnQuestionsRetrievedListener() {
+            @Override
+            public void onSuccess(List<Question> currentQuestions) {
+                if (questionIndex >= 0 && questionIndex < currentQuestions.size()) {
+                    currentQuestions.set(questionIndex, updatedQuestion);
+                    updateGroupQuestions(groupId, (ArrayList<Question>) currentQuestions, listener);
+                } else {
+                    listener.onFailure("Некорректный индекс вопроса");
+                }
+            }
+
+            @Override
+            public void onFailure(String error) {
+                listener.onFailure(error);
+            }
+        });
     }
 }

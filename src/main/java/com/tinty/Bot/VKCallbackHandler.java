@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.tinty.Bot.Entity.QuestionMessage;
 import com.tinty.Enum.QuestionState;
 import com.tinty.Enum.UserState;
+import com.tinty.Firebase.Entity.Answer;
 import com.tinty.Firebase.Entity.Question;
 import com.vk.api.sdk.exceptions.ApiException;
 import com.vk.api.sdk.exceptions.ClientException;
@@ -20,6 +21,7 @@ public class VKCallbackHandler {
 
     private final Map<Long, UserState> userStates = new ConcurrentHashMap<>();
     private final Map<Long, QuestionMessage> userMessages = new ConcurrentHashMap<>();
+    private final Map<Long, String> userGroups = new ConcurrentHashMap<>();
 
     private static final String groupsMapPath = "groupsMap";
 
@@ -63,13 +65,32 @@ public class VKCallbackHandler {
         UserState currentUserState = userStates.getOrDefault(peerId, UserState.NONE);
 
         if (allowedToWriteUsers.contains(peerId)) {
-            // Обрабатываем и удаляем разрешение
             allowedToWriteUsers.remove(peerId);
 
-            // TODO: DEBUG
-            Keyboard kb = buildLobbyInlineKeyboard(userMessages.get(peerId).getState());
+            QuestionMessage currentQuestionMessage = userMessages.get(peerId);
 
-            sendMessage(peerId, "Комментарий сохранен.", kb);
+            ArrayList<Answer> answers = currentQuestionMessage.getAnswers();
+            Answer answer = new Answer(peerId, text);
+            answers.add(answer);
+
+            Question newQuestion = new Question(currentQuestionMessage.getContent(), currentQuestionMessage.getType(),
+                    currentQuestionMessage.getAnswers());
+
+            updateQuestionByIndex(userGroups.get(peerId), currentQuestionMessage.getQuestions().indexOf(currentQuestionMessage),
+                    newQuestion, new OnQuestionsUpdatedListener() {
+                @Override
+                public void onSuccess() {
+                    // TODO: DEBUG
+                    Keyboard kb = buildLobbyInlineKeyboard(userMessages.get(peerId).getState());
+
+                    sendMessage(peerId, "Комментарий сохранен.\n\nТекущий вопрос:\n" + currentQuestionMessage.getContent(), kb);
+                }
+
+                @Override
+                public void onFailure(String error) {
+                    System.err.println(error);
+                }
+            });
         } else {
             if (text.equals("Начать")) {
                 Keyboard kb = buildStartInlineKeyboard();
@@ -91,15 +112,20 @@ public class VKCallbackHandler {
                     if ((groupId = (String) groupsMap.get(text)) != null) {
                         sendMessage(peerId, "Лобби найдено!");
 
-//                        addParticipant(groupId);
+                        userGroups.put(peerId, groupId);
+
+                        // DEBUG: Добавляет участника в БД
+                        addParticipant(groupId, peerId);
 
                         getGroupQuestions(groupId, new OnQuestionsRetrievedListener() {
                             @Override
                             public void onSuccess(List<Question> questions) {
                                 Keyboard kb = buildLobbyInlineKeyboard(QuestionState.FIRST);
+                                Question firstQuestion = questions.getFirst();
                                 QuestionMessage questionMessage = new QuestionMessage(
-                                        questions.getFirst().getContent(),
-                                        questions.getFirst().getType(),
+                                        firstQuestion.getContent(),
+                                        firstQuestion.getType(),
+                                        firstQuestion.getAnswers(),
                                         (ArrayList<Question>) questions,
                                         QuestionState.FIRST
                                 );
@@ -118,12 +144,8 @@ public class VKCallbackHandler {
                         sendMessage(peerId, "Лобби не найдено.\nПроверьте правильность кода.", kb);
                     }
                 } else {
-                    Keyboard kb;
                     // Игнор или предупреждение
-                    if (currentUserState == UserState.STARTING_CONVERSATION) kb = buildStartInlineKeyboard();
-                    // TODO: DEBUG
-                    else kb = buildLobbyInlineKeyboard(userMessages.get(peerId).getState());
-                    sendMessage(peerId, "Пожалуйста, сначала выберите действие.", kb);
+                    sendMessage(peerId, "Пожалуйста, сначала выберите действие.");
                 }
             }
         }
@@ -136,27 +158,26 @@ public class VKCallbackHandler {
 
         switch (action) {
             case "allow_comment" -> {
-                allowedToWriteUsers.add(peerId); // разрешаем писать
+                allowedToWriteUsers.add(peerId);
 
                 // Обязательно подтвердить callback (иначе кнопка не "моргнёт")
-                try {
-                    sendMessage(peerId, "Теперь вы можете оставить комментарий.");
-
-                    config.vk.messages()
-                            .sendMessageEventAnswer(config.actor)
-                            .eventId(event.get("event_id").getAsString())
-                            .userId((long) event.get("user_id").getAsInt())
-                            .peerId(peerId)
-                            .eventData("{\"type\": \"show_snackbar\", \"text\": \"Теперь вы можете оставить комментарий.\"}")
-                            .execute();
-                } catch (ApiException | ClientException e) {
-                    throw new RuntimeException(e);
-                }
+                sendMessage(peerId, "Теперь вы можете оставить комментарий:");
+//                try {
+//                    config.vk.messages()
+//                            .sendMessageEventAnswer(config.actor)
+//                            .eventId(event.get("event_id").getAsString())
+//                            .userId((long) event.get("user_id").getAsInt())
+//                            .peerId(peerId)
+//                            .eventData("{\"type\": \"show_snackbar\", \"text\": \"Теперь вы можете оставить комментарий.\"}")
+//                            .execute();
+//                } catch (ApiException | ClientException e) {
+//                    throw new RuntimeException(e);
+//                }
             }
             case "join_lobby" -> {
                 sendMessage(peerId, "Введите код лобби:");
 
-                userStates.put(peerId, UserState.WAITING_FOR_LOBBY_CODE); // Устанавливаем состояние для этого пользователя
+                userStates.put(peerId, UserState.WAITING_FOR_LOBBY_CODE);
             }
             case "move_back" -> {
                 QuestionMessage questionMessage = userMessages.get(peerId);
@@ -172,6 +193,7 @@ public class VKCallbackHandler {
                     userMessages.replace(peerId, new QuestionMessage(
                             prevQuestion.getContent(),
                             prevQuestion.getType(),
+                            prevQuestion.getAnswers(),
                             questions,
                             QuestionState.NONE
                     ));
@@ -182,6 +204,7 @@ public class VKCallbackHandler {
                     userMessages.replace(peerId, new QuestionMessage(
                             questionMessage.getContent(),
                             questionMessage.getType(),
+                            questionMessage.getAnswers(),
                             questions,
                             QuestionState.FIRST
                     ));
@@ -203,15 +226,17 @@ public class VKCallbackHandler {
                     userMessages.replace(peerId, new QuestionMessage(
                             nextQuestion.getContent(),
                             nextQuestion.getType(),
+                            questionMessage.getAnswers(),
                             questions,
                             QuestionState.NONE
                     ));
                 } else {
                     kb = buildLobbyInlineKeyboard(QuestionState.LAST);
-                    sendMessage(peerId, "Более поздних вопросов нет.\nТекущий вопрос:\n" + questions.get(questionIndex).getContent(), kb);
+                    sendMessage(peerId, "Более поздних вопросов нет.\n\nТекущий вопрос:\n" + questions.get(questionIndex).getContent(), kb);
                     userMessages.replace(peerId, new QuestionMessage(
                             questionMessage.getContent(),
                             questionMessage.getType(),
+                            questionMessage.getAnswers(),
                             questions,
                             QuestionState.LAST
                     ));
@@ -254,7 +279,7 @@ public class VKCallbackHandler {
         KeyboardButtonActionCallback joinAction = new KeyboardButtonActionCallback()
                 .setType(KeyboardButtonActionCallbackType.CALLBACK)
                 .setPayload("{\"action\":\"join_lobby\"}")
-                .setLabel("Присоедениться");
+                .setLabel("Присоединиться");
 
         KeyboardButton joinButton = new KeyboardButton()
                 .setAction(joinAction)
@@ -264,7 +289,7 @@ public class VKCallbackHandler {
         List<List<KeyboardButton>> buttons = List.of(row1);
 
         return new Keyboard()
-                .setInline(true) // именно inline‑клавиатура
+                .setInline(true)
                 .setButtons(buttons);
     }
 
@@ -273,22 +298,22 @@ public class VKCallbackHandler {
 
         KeyboardButtonActionCallback backAction = new KeyboardButtonActionCallback()
                 .setType(KeyboardButtonActionCallbackType.CALLBACK)
-                .setPayload("{\"action\":\"move_back\"}") // что придёт в message.text
+                .setPayload("{\"action\":\"move_back\"}")
                 .setLabel("⬅️");
 
         KeyboardButtonActionCallback commentAction = new KeyboardButtonActionCallback()
                 .setType(KeyboardButtonActionCallbackType.CALLBACK)
-                .setPayload("{\"action\":\"allow_comment\"}") // что придёт в message.text
+                .setPayload("{\"action\":\"allow_comment\"}")
                 .setLabel("\uD83D\uDCDD");
 
         KeyboardButtonActionCallback readAction = new KeyboardButtonActionCallback()
                 .setType(KeyboardButtonActionCallbackType.CALLBACK)
-                .setPayload("{\"action\":\"read_action\"}") // что придёт в message.text
+                .setPayload("{\"action\":\"read_action\"}")
                 .setLabel("\uD83D\uDCD6");
 
         KeyboardButtonActionCallback forwardAction = new KeyboardButtonActionCallback()
                 .setType(KeyboardButtonActionCallbackType.CALLBACK)
-                .setPayload("{\"action\":\"move_forward\"}") // что придёт в message.text
+                .setPayload("{\"action\":\"move_forward\"}")
                 .setLabel("➡️");
 
         KeyboardButton backButton = new KeyboardButton()
@@ -327,7 +352,7 @@ public class VKCallbackHandler {
         if (state != QuestionState.FIRST) {
             KeyboardButtonActionCallback backAction = new KeyboardButtonActionCallback()
                     .setType(KeyboardButtonActionCallbackType.CALLBACK)
-                    .setPayload("{\"action\":\"move_back\"}") // что придёт в message.text
+                    .setPayload("{\"action\":\"move_back\"}")
                     .setLabel("⬅️");
 
             KeyboardButton backButton = new KeyboardButton()
@@ -339,18 +364,18 @@ public class VKCallbackHandler {
 
         KeyboardButtonActionCallback commentAction = new KeyboardButtonActionCallback()
                 .setType(KeyboardButtonActionCallbackType.CALLBACK)
-                .setPayload("{\"action\":\"allow_comment\"}") // что придёт в message.text
+                .setPayload("{\"action\":\"allow_comment\"}")
                 .setLabel("\uD83D\uDCDD");
 
         KeyboardButtonActionCallback readAction = new KeyboardButtonActionCallback()
                 .setType(KeyboardButtonActionCallbackType.CALLBACK)
-                .setPayload("{\"action\":\"read_action\"}") // что придёт в message.text
+                .setPayload("{\"action\":\"read_action\"}")
                 .setLabel("\uD83D\uDCD6");
 
         if (state != QuestionState.LAST) {
             KeyboardButtonActionCallback forwardAction = new KeyboardButtonActionCallback()
                     .setType(KeyboardButtonActionCallbackType.CALLBACK)
-                    .setPayload("{\"action\":\"move_forward\"}") // что придёт в message.text
+                    .setPayload("{\"action\":\"move_forward\"}")
                     .setLabel("➡️");
 
             KeyboardButton forwardButton = new KeyboardButton()
@@ -360,8 +385,6 @@ public class VKCallbackHandler {
             buttonRow[2] = forwardButton;
         }
 
-
-
         KeyboardButton commentButton = new KeyboardButton()
                 .setAction(commentAction)
                 .setColor(KeyboardButtonColor.DEFAULT);
@@ -369,8 +392,6 @@ public class VKCallbackHandler {
         KeyboardButton readButton = new KeyboardButton()
                 .setAction(readAction)
                 .setColor(KeyboardButtonColor.DEFAULT);
-
-
 
         if (state == QuestionState.FIRST) {
             buttonRow[0] = commentButton;

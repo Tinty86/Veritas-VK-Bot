@@ -15,7 +15,7 @@ public class Question {
 
     public Question() {}
 
-    public Question(String content, String type) {
+    public Question(String content, String type, ArrayList<Answer> answers) {
         boolean isTypeCorrect = false;
         if (type.equals("init")) {
             isTypeCorrect = true;
@@ -32,7 +32,7 @@ public class Question {
             this.content = content;
             this.type = type;
             timeStamp = getCurrentTimeStamp();
-            answers = new ArrayList<>();
+            this.answers = answers;
         } else {
             System.err.println("question class got inappropriate question type.\nReceived question type: " + type);
         }

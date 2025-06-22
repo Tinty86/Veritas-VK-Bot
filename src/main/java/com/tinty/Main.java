@@ -11,7 +11,6 @@ import java.util.Objects;
 
 public class Main {
     private static final Long GROUP_ID = 231030761L;
-    private static long userId;
 
     public static void main(String[] args) {
         try {
@@ -35,13 +34,5 @@ public class Main {
         });
 
         System.out.println("Bot is up and running!");
-    }
-
-    public static long getUserId() {
-        return userId;
-    }
-
-    public static void setUserId(long userId) {
-        Main.userId = userId;
     }
 }
